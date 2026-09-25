@@ -6,7 +6,7 @@ const { NodeSDK } = require('@opentelemetry/sdk-node');
 const { getNodeAutoInstrumentations } = require('@opentelemetry/auto-instrumentations-node');
 
 const loggerProvider = new LoggerProvider(process.env.OTEL_EXPORTER_OTLP_ENDPOINT ? {
-  processors: [new SimpleLogRecordProcessor(new OTLPLogExporter())],
+  processors: [new SimpleLogRecordProcessor({ exporter: new OTLPLogExporter() })],
 } : undefined);
 if (process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
   logs.setGlobalLoggerProvider(loggerProvider);

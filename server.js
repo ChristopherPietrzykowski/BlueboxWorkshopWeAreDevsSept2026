@@ -2,6 +2,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const { trace } = require('@opentelemetry/api');
 
 const port = Number(process.env.PORT || 8088);
 const paymentUrl = process.env.PAYMENT_URL || 'http://localhost:4004';
@@ -23,7 +24,10 @@ const database = async (url, options = {}) => {
   if (!response.ok) throw new Error(data?.message || data?.details || `Database request failed: ${response.status}`);
   return data;
 };
-const mapProduct = product => ({ ...product, priceCents: product.price_cents, price_cents: undefined });
+const mapProduct = ({ price_cents: originalPriceCents, discount_percent: discountPercent = 0, ...product }) => {
+  const onSale = discountPercent > 0;
+  return { ...product, priceCents: onSale ? Math.round(originalPriceCents * (100 - discountPercent) / 100) : originalPriceCents, originalPriceCents, discountPercent, onSale };
+};
 const cart = userId => database(`/carts?user_id=eq.${encodeURIComponent(userId)}&select=quantity,products(*)`).then(items => items.map(item => ({ product: mapProduct(item.products), quantity: item.quantity })));
 
 async function route(req, res, url) {
@@ -32,10 +36,13 @@ async function route(req, res, url) {
   const userId = url.searchParams.get('userId') || 'workshop-user';
   if (url.pathname === '/api/cart' && req.method === 'GET') return send(res, 200, await cart(userId));
   if (url.pathname === '/api/cart' && req.method === 'POST') {
-    const input = await readBody(req); const existing = await database(`/carts?user_id=eq.${encodeURIComponent(userId)}&product_id=eq.${encodeURIComponent(input.productId)}&select=quantity`);
-    const quantity = (existing[0]?.quantity || 0) + Number(input.quantity || 1);
-    await database('/carts', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=representation' }, body: JSON.stringify({ user_id: userId, product_id: input.productId, quantity }) });
-    return send(res, 200, await cart(userId));
+    const input = await readBody(req); const quantity = Number(input.quantity || 1);
+    const span = trace.getActiveSpan();
+    span?.setAttributes({ 'product.id': String(input.productId), 'cart.quantity_added': quantity });
+    await database('/rpc/add_to_cart', { method: 'POST', body: JSON.stringify({ p_user_id: userId, p_product_id: input.productId, p_quantity: quantity }) });
+    const items = await cart(userId);
+    span?.setAttribute('product.on_sale', Boolean(items.find(item => item.product.id === input.productId)?.product.onSale));
+    return send(res, 200, items);
   }
   if (url.pathname === '/api/cart' && req.method === 'DELETE') { await database(`/carts?user_id=eq.${encodeURIComponent(userId)}`, { method: 'DELETE' }); return send(res, 204, null); }
   if (url.pathname === '/api/checkout' && req.method === 'POST') {
