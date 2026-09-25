@@ -94,7 +94,7 @@ services:
       - ./loadgen/smoke.js:/scripts/smoke.js:ro
     depends_on:
       shop:
-        condition: service_started
+        condition: service_healthy
 
 volumes:
   workshop-db:

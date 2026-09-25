@@ -16,6 +16,8 @@ To stop the app:
 make down
 ```
 
+`db/init.sql` only runs on a fresh database volume. After changing it, run `make clean` (this wipes carts).
+
 ### OTel
 
 If you want OTel, use:
